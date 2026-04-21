@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="115" fill="#1CBFA2"/>
+  <circle cx="256" cy="222" r="95" fill="rgba(255,255,255,0.22)"/>
+  <circle cx="256" cy="222" r="58" fill="white"/>
+  <text x="256" y="420"
+    text-anchor="middle"
+    font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+    font-weight="700"
+    font-size="118"
+    letter-spacing="-4"
+    fill="white">NC</text>
+</svg>

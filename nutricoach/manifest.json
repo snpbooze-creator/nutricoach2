@@ -1,0 +1,17 @@
+{
+  "name": "NutriCoach",
+  "short_name": "NutriCoach",
+  "description": "Nutrition coaching — track meals, check-ins, and appointments.",
+  "start_url": "./app/index.html",
+  "display": "standalone",
+  "background_color": "#1CBFA2",
+  "theme_color": "#1CBFA2",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
