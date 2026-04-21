@@ -15,15 +15,23 @@ async function initDashboard() {
   initLogout();
   initTabs();
 
-  const clients = await getClientsByNutritionist(session.userId);
+  const today = new Date().toISOString().split('T')[0];
+  const [clients, allAppts] = await Promise.all([
+    getClientsByNutritionist(session.userId),
+    getAppointmentsByNutritionist(session.userId)
+  ]);
+
   document.getElementById('stat-clients').textContent = clients.length;
 
-  const today = new Date().toISOString().split('T')[0];
+  const upcomingCount = allAppts.filter(a => a.status !== 'cancelled' && a.status !== 'completed' && a.date >= today).length;
+  document.getElementById('stat-upcoming-appts').textContent = upcomingCount;
+
   const allCheckIns = await Promise.all(clients.map(c => getCheckInsByClient(c.id)));
   const todayCount = allCheckIns.flat().filter(ci => ci.date === today).length;
   document.getElementById('stat-today-checkins').textContent = todayCount;
 
   await renderClientList(clients);
+  await renderAppointmentsTab(session, clients);
   await renderTemplateManager(session.userId);
 }
 
@@ -194,6 +202,143 @@ function openTemplateEditor(existing, nutritionistId, onSave) {
   };
 
   document.getElementById('close-modal-btn').onclick = () => { modal.style.display = 'none'; };
+}
+
+// ─── APPOINTMENTS TAB ────────────────────────────────────────────────────────
+
+async function renderAppointmentsTab(session, clients) {
+  const el = document.getElementById('appointments-list');
+  if (!el) return;
+
+  const TYPE_LABELS = {
+    consultation:   'Initial Consultation',
+    'follow-up':    'Follow-up',
+    review:         'Progress Review',
+    'goal-setting': 'Goal Setting',
+    other:          'Other'
+  };
+
+  let activeFilter = 'upcoming';
+
+  async function render() {
+    const today = new Date().toISOString().split('T')[0];
+    const all   = await getAppointmentsByNutritionist(session.userId);
+
+    let list;
+    if (activeFilter === 'upcoming') {
+      list = all.filter(a => a.status !== 'cancelled' && a.status !== 'completed' && a.date >= today);
+    } else if (activeFilter === 'past') {
+      list = all.filter(a => a.status === 'completed' || a.date < today)
+                .sort((a, b) => b.date.localeCompare(a.date));
+    } else {
+      list = [...all].sort((a, b) => b.date.localeCompare(a.date));
+    }
+
+    document.querySelectorAll('.appt-filter-btn').forEach(btn => {
+      const isActive = btn.dataset.filter === activeFilter;
+      btn.className = `btn btn-sm ${isActive ? 'btn-secondary' : 'btn-ghost'} appt-filter-btn`;
+    });
+
+    if (!list.length) {
+      el.innerHTML = `<div class="empty-state"><div class="empty-icon">📅</div><p>${activeFilter === 'upcoming' ? 'No upcoming appointments. Schedule one!' : 'No appointments found.'}</p></div>`;
+      return;
+    }
+
+    el.innerHTML = list.map(a => {
+      const statusBadge = ({
+        upcoming:  `<span class="badge badge-blue">Upcoming</span>`,
+        completed: `<span class="badge badge-green">Completed</span>`,
+        cancelled: `<span class="badge" style="background:var(--border);color:var(--text-muted)">Cancelled</span>`,
+        requested: `<span class="badge badge-yellow">Requested</span>`
+      })[a.status] || `<span class="badge">${a.status}</span>`;
+
+      const canAct = a.status === 'upcoming' || a.status === 'requested';
+      return `
+        <div class="card card-sm" style="margin-bottom:10px">
+          <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+            <div class="avatar" style="width:38px;height:38px;font-size:13px;flex-shrink:0">${getInitials(a.clientName || '?')}</div>
+            <div style="flex:1;min-width:0">
+              <div style="font-weight:600;font-size:14px">${a.clientName || 'Unknown'}</div>
+              <div style="font-size:12px;color:var(--text-muted);margin-top:2px">
+                ${formatDate(a.date)} · ${formatTime(a.time)} · ${TYPE_LABELS[a.type] || a.type}
+              </div>
+              ${a.notes ? `<div style="font-size:12px;color:var(--text-muted);margin-top:3px;font-style:italic">${a.notes}</div>` : ''}
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+              ${statusBadge}
+              ${canAct ? `
+                <button class="btn btn-sm btn-secondary complete-btn" data-id="${a.id}">Done</button>
+                <button class="btn btn-sm btn-ghost cancel-btn" data-id="${a.id}" style="color:var(--danger)">✕</button>
+              ` : ''}
+            </div>
+          </div>
+        </div>`;
+    }).join('');
+
+    el.querySelectorAll('.complete-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        await updateAppointment(btn.dataset.id, { status: 'completed' });
+        showToast('Marked as completed.', 'success');
+        await render();
+      });
+    });
+
+    el.querySelectorAll('.cancel-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        if (!confirm('Cancel this appointment?')) return;
+        await updateAppointment(btn.dataset.id, { status: 'cancelled' });
+        showToast('Appointment cancelled.');
+        await render();
+      });
+    });
+  }
+
+  document.querySelectorAll('.appt-filter-btn').forEach(btn => {
+    btn.addEventListener('click', () => { activeFilter = btn.dataset.filter; render(); });
+  });
+
+  await render();
+
+  const modal = document.getElementById('appointment-modal');
+  const form  = document.getElementById('appointment-form');
+
+  document.getElementById('new-appt-btn')?.addEventListener('click', () => {
+    const sel = document.getElementById('appt-client');
+    sel.innerHTML = `<option value="">Select a client…</option>` +
+      clients.map(c => `<option value="${c.id}" data-name="${c.name}">${c.name}</option>`).join('');
+    document.getElementById('appt-date').min   = new Date().toISOString().split('T')[0];
+    document.getElementById('appt-date').value = new Date().toISOString().split('T')[0];
+    modal.style.display = 'flex';
+  });
+
+  document.getElementById('close-appt-modal-btn')?.addEventListener('click', () => {
+    modal.style.display = 'none';
+  });
+
+  form?.addEventListener('submit', async e => {
+    e.preventDefault();
+    const sel        = document.getElementById('appt-client');
+    const clientId   = sel.value;
+    const clientName = sel.options[sel.selectedIndex]?.dataset.name || '';
+    const date       = document.getElementById('appt-date').value;
+    const time       = document.getElementById('appt-time').value;
+    const type       = document.getElementById('appt-type').value;
+    const notes      = document.getElementById('appt-notes').value.trim();
+
+    if (!clientId) { showToast('Please select a client.', 'error'); return; }
+    if (!date)     { showToast('Please choose a date.', 'error'); return; }
+    if (!time)     { showToast('Please choose a time.', 'error'); return; }
+
+    const btn = form.querySelector('button[type="submit"]');
+    btn.disabled = true; btn.textContent = 'Scheduling…';
+    await scheduleAppointment({ clientId, nutritionistId: session.userId, clientName, date, time, type, notes, status: 'upcoming', createdBy: 'nutritionist' });
+    btn.disabled = false; btn.textContent = 'Schedule Appointment';
+    modal.style.display = 'none';
+    form.reset();
+    showToast('Appointment scheduled!', 'success');
+    activeFilter = 'upcoming';
+    await render();
+  });
 }
 
 // ─── CLIENT PROFILE ──────────────────────────────────────────────────────────

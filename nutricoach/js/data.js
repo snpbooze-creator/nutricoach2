@@ -132,6 +132,47 @@ async function saveMealChecks(clientId, date, checks) {
   await db.collection('mealChecks').doc(docId).set({ clientId, date, checks });
 }
 
+// ─── APPOINTMENTS ────────────────────────────────────────────────────────────
+
+async function getAppointmentsByClient(clientId) {
+  const snap = await db.collection('appointments').where('clientId', '==', clientId).get();
+  return snap.docs
+    .map(d => ({ id: d.id, ...d.data() }))
+    .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+}
+
+async function getAppointmentsByNutritionist(nutritionistId) {
+  const snap = await db.collection('appointments').where('nutritionistId', '==', nutritionistId).get();
+  return snap.docs
+    .map(d => ({ id: d.id, ...d.data() }))
+    .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+}
+
+async function scheduleAppointment({ clientId, nutritionistId, clientName, date, time, type, notes, status, createdBy }) {
+  const ref = db.collection('appointments').doc();
+  await ref.set({
+    clientId,
+    nutritionistId,
+    clientName: clientName || '',
+    date,
+    time,
+    type: type || 'consultation',
+    notes: notes || '',
+    status: status || 'upcoming',
+    createdBy: createdBy || 'nutritionist',
+    createdAt: new Date().toISOString()
+  });
+  return { id: ref.id };
+}
+
+async function updateAppointment(appointmentId, fields) {
+  await db.collection('appointments').doc(appointmentId).update(fields);
+}
+
+async function deleteAppointment(appointmentId) {
+  await db.collection('appointments').doc(appointmentId).delete();
+}
+
 // ─── UTILITIES (sync) ────────────────────────────────────────────────────────
 
 function formatDate(dateStr) {
@@ -142,6 +183,14 @@ function formatDate(dateStr) {
 function formatDateShort(dateStr) {
   const d = new Date(dateStr + 'T12:00:00');
   return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+}
+
+function formatTime(timeStr) {
+  if (!timeStr) return '';
+  const [h, m] = timeStr.split(':').map(Number);
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  const hour = h % 12 || 12;
+  return `${hour}:${m.toString().padStart(2, '0')} ${ampm}`;
 }
 
 function scoreClass(val) {

@@ -21,6 +21,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   await renderMealPlan(client);
   renderCheckInForm(client);
   await renderCheckInHistory(client);
+  await renderClientAppointments(client, session);
 });
 
 async function renderStats(client) {
@@ -208,6 +209,147 @@ function renderCheckInForm(client) {
     await saveMealChecks(client.id, today, []);
     await renderMealPlan(client);
   });
+}
+
+// ─── APPOINTMENTS ────────────────────────────────────────────────────────────
+
+async function renderClientAppointments(client, session) {
+  const el = document.getElementById('appointments-content');
+  if (!el) return;
+
+  const TYPE_LABELS = {
+    consultation:   'Initial Consultation',
+    'follow-up':    'Follow-up',
+    review:         'Progress Review',
+    'goal-setting': 'Goal Setting',
+    other:          'Other'
+  };
+
+  async function render() {
+    const today = new Date().toISOString().split('T')[0];
+    const all   = await getAppointmentsByClient(client.id);
+
+    const upcoming  = all.filter(a => (a.status === 'upcoming' || a.status === 'requested') && a.date >= today);
+    const past      = all.filter(a => a.status === 'completed' || (a.date < today && a.status !== 'cancelled'))
+                        .sort((a, b) => b.date.localeCompare(a.date));
+    const cancelled = all.filter(a => a.status === 'cancelled');
+
+    function apptCard(a) {
+      const statusBadge = ({
+        upcoming:  `<span class="badge badge-blue">Confirmed</span>`,
+        completed: `<span class="badge badge-green">Completed</span>`,
+        cancelled: `<span class="badge" style="background:var(--border);color:var(--text-muted)">Cancelled</span>`,
+        requested: `<span class="badge badge-yellow">Requested</span>`
+      })[a.status] || `<span class="badge">${a.status}</span>`;
+
+      const canCancel = a.status === 'upcoming' || a.status === 'requested';
+      return `
+        <div class="card card-sm" style="margin-bottom:8px">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+            <div style="min-width:0">
+              <div style="font-weight:600;font-size:14px">${TYPE_LABELS[a.type] || a.type}</div>
+              <div style="font-size:12px;color:var(--text-muted);margin-top:2px">${formatDate(a.date)} · ${formatTime(a.time)}</div>
+              ${a.notes ? `<div style="font-size:12px;color:var(--text-muted);margin-top:3px;font-style:italic">${a.notes}</div>` : ''}
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+              ${statusBadge}
+              ${canCancel ? `<button class="btn btn-sm btn-ghost cancel-appt-btn" data-id="${a.id}" style="color:var(--danger)">Cancel</button>` : ''}
+            </div>
+          </div>
+        </div>`;
+    }
+
+    el.innerHTML = `
+      <div class="card" style="max-width:560px;margin-bottom:20px">
+        <div class="card-header">
+          <div>
+            <div class="card-title">Request Appointment</div>
+            <div class="card-subtitle">Your nutritionist will confirm the time</div>
+          </div>
+        </div>
+        <form id="request-appt-form">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+            <div class="form-group" style="margin-bottom:0">
+              <label for="req-date">Preferred date</label>
+              <input type="date" id="req-date" min="${today}" required>
+            </div>
+            <div class="form-group" style="margin-bottom:0">
+              <label for="req-time">Preferred time</label>
+              <input type="time" id="req-time" required>
+            </div>
+          </div>
+          <div class="form-group" style="margin-top:22px">
+            <label for="req-type">Type</label>
+            <select id="req-type">
+              <option value="follow-up">Follow-up</option>
+              <option value="consultation">Initial Consultation</option>
+              <option value="review">Progress Review</option>
+              <option value="goal-setting">Goal Setting</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="req-notes">Notes (optional)</label>
+            <textarea id="req-notes" rows="2" placeholder="What would you like to discuss?"></textarea>
+          </div>
+          <button type="submit" class="btn btn-primary">Send Request</button>
+        </form>
+      </div>
+
+      ${upcoming.length ? `
+        <div style="margin-bottom:16px">
+          <div class="section-title" style="margin-bottom:10px">Upcoming</div>
+          ${upcoming.map(apptCard).join('')}
+        </div>` : ''}
+
+      ${past.length ? `
+        <div style="margin-bottom:16px">
+          <div class="section-title" style="margin-bottom:10px">Past</div>
+          ${past.map(apptCard).join('')}
+        </div>` : ''}
+
+      ${cancelled.length ? `
+        <div style="margin-bottom:16px">
+          <div class="section-title" style="margin-bottom:10px">Cancelled</div>
+          ${cancelled.map(apptCard).join('')}
+        </div>` : ''}
+
+      ${!all.length ? `<div class="empty-state"><div class="empty-icon">📅</div><p>No appointments yet. Request one above!</p></div>` : ''}
+    `;
+
+    document.getElementById('request-appt-form').addEventListener('submit', async e => {
+      e.preventDefault();
+      const date  = document.getElementById('req-date').value;
+      const time  = document.getElementById('req-time').value;
+      const type  = document.getElementById('req-type').value;
+      const notes = document.getElementById('req-notes').value.trim();
+      const btn   = e.target.querySelector('button[type="submit"]');
+      btn.disabled = true; btn.textContent = 'Sending…';
+      await scheduleAppointment({
+        clientId:       client.id,
+        nutritionistId: client.nutritionistId || '',
+        clientName:     session.name,
+        date, time, type, notes,
+        status:    'requested',
+        createdBy: 'client'
+      });
+      btn.disabled = false; btn.textContent = 'Send Request';
+      showToast('Appointment requested!', 'success');
+      e.target.reset();
+      await render();
+    });
+
+    el.querySelectorAll('.cancel-appt-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        if (!confirm('Cancel this appointment?')) return;
+        await updateAppointment(btn.dataset.id, { status: 'cancelled' });
+        showToast('Appointment cancelled.');
+        await render();
+      });
+    });
+  }
+
+  await render();
 }
 
 // ─── CHECK-IN HISTORY ────────────────────────────────────────────────────────

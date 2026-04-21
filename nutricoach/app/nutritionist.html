@@ -64,10 +64,14 @@
     <div class="hero">
       <h1 class="hero-title">Dashboard</h1>
       <p class="hero-sub">Manage your clients and meal plan templates.</p>
-      <div class="hero-stats" style="grid-template-columns:1fr 1fr;max-width:280px">
+      <div class="hero-stats" style="grid-template-columns:1fr 1fr 1fr;max-width:420px">
         <div class="hero-stat">
-          <div class="hero-stat-label">Total Clients</div>
+          <div class="hero-stat-label">Clients</div>
           <div class="hero-stat-value" id="stat-clients">0</div>
+        </div>
+        <div class="hero-stat">
+          <div class="hero-stat-label">Upcoming Appts</div>
+          <div class="hero-stat-value" id="stat-upcoming-appts">0</div>
         </div>
         <div class="hero-stat">
           <div class="hero-stat-label">Check-ins Today</div>
@@ -81,6 +85,7 @@
       <div data-tabs="dash">
         <div class="tabs">
           <button class="tab active" data-tab="clients">Clients</button>
+          <button class="tab" data-tab="appointments">Appointments</button>
           <button class="tab" data-tab="templates">Meal Templates</button>
         </div>
 
@@ -88,6 +93,21 @@
         <div class="tab-panel active tab-body" data-tab-group="dash" data-tab="clients">
           <div class="section">
             <div class="client-list" id="client-list"></div>
+          </div>
+        </div>
+
+        <!-- Appointments tab -->
+        <div class="tab-panel tab-body" data-tab-group="dash" data-tab="appointments">
+          <div class="section">
+            <div class="section-header">
+              <div style="display:flex;gap:6px">
+                <button class="btn btn-sm btn-secondary appt-filter-btn" data-filter="upcoming">Upcoming</button>
+                <button class="btn btn-sm btn-ghost appt-filter-btn" data-filter="all">All</button>
+                <button class="btn btn-sm btn-ghost appt-filter-btn" data-filter="past">Past</button>
+              </div>
+              <button class="btn btn-sm btn-primary" id="new-appt-btn">+ New Appointment</button>
+            </div>
+            <div id="appointments-list"></div>
           </div>
         </div>
 
@@ -115,6 +135,49 @@
         <span>Sign out</span>
       </button>
     </nav>
+  </div>
+
+  <!-- Appointment modal -->
+  <div class="modal-backdrop" id="appointment-modal">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title">Schedule Appointment</span>
+        <button class="btn btn-sm btn-ghost" id="close-appt-modal-btn">✕</button>
+      </div>
+      <form id="appointment-form">
+        <div class="form-group">
+          <label for="appt-client">Client</label>
+          <select id="appt-client" required>
+            <option value="">Select a client…</option>
+          </select>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+          <div class="form-group" style="margin-bottom:0">
+            <label for="appt-date">Date</label>
+            <input type="date" id="appt-date" required>
+          </div>
+          <div class="form-group" style="margin-bottom:0">
+            <label for="appt-time">Time</label>
+            <input type="time" id="appt-time" required>
+          </div>
+        </div>
+        <div class="form-group" style="margin-top:22px">
+          <label for="appt-type">Type</label>
+          <select id="appt-type">
+            <option value="follow-up">Follow-up</option>
+            <option value="consultation">Initial Consultation</option>
+            <option value="review">Progress Review</option>
+            <option value="goal-setting">Goal Setting</option>
+            <option value="other">Other</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="appt-notes">Notes (optional)</label>
+          <textarea id="appt-notes" rows="2" placeholder="Agenda, topics to discuss…"></textarea>
+        </div>
+        <button type="submit" class="btn btn-primary btn-full">Schedule Appointment</button>
+      </form>
+    </div>
   </div>
 
   <!-- Template editor modal -->
