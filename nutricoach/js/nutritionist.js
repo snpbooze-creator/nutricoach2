@@ -30,40 +30,77 @@ async function initDashboard() {
   const todayCount = allCheckIns.flat().filter(ci => ci.date === today).length;
   document.getElementById('stat-today-checkins').textContent = todayCount;
 
-  await renderClientList(clients);
-  await renderAppointmentsTab(session, clients);
+  await renderClientList(session);
+  await renderAppointmentsTab(session);
   await renderTemplateManager(session.userId);
 }
 
-async function renderClientList(clients) {
+async function renderClientList(session) {
   const el = document.getElementById('client-list');
-  if (!clients.length) {
-    el.innerHTML = '<div class="empty-state"><p>No clients assigned yet.</p></div>';
-    return;
-  }
-  const rows = await Promise.all(clients.map(async c => {
-    const [checkIns, plan] = await Promise.all([
-      getCheckInsByClient(c.id),
-      getMealPlanByClient(c.id)
+
+  async function render() {
+    const [assigned, unassigned] = await Promise.all([
+      getClientsByNutritionist(session.userId),
+      getUnassignedClients()
     ]);
-    const last = checkIns[0];
-    return `
-      <a class="client-row" href="client-profile.html?clientId=${c.id}">
-        <div class="client-row-info">
-          <div class="avatar">${getInitials(c.name)}</div>
-          <div>
-            <div class="client-row-name">${c.name}</div>
-            <div class="client-row-meta">${c.goal || 'No goal set'} · ${c.currentWeight ? c.currentWeight + ' kg' : '—'}</div>
-          </div>
+
+    document.getElementById('stat-clients').textContent = assigned.length;
+
+    const assignedRows = assigned.length
+      ? await Promise.all(assigned.map(async c => {
+          const [checkIns, plan] = await Promise.all([
+            getCheckInsByClient(c.id),
+            getMealPlanByClient(c.id)
+          ]);
+          const last = checkIns[0];
+          return `
+            <a class="client-row" href="client-profile.html?clientId=${c.id}">
+              <div class="client-row-info">
+                <div class="avatar">${getInitials(c.name)}</div>
+                <div>
+                  <div class="client-row-name">${c.name}</div>
+                  <div class="client-row-meta">${c.goal || 'No goal set'} · ${c.currentWeight ? c.currentWeight + ' kg' : '—'}</div>
+                </div>
+              </div>
+              <div class="client-row-right">
+                ${last ? `<span class="badge badge-green badge-hide-mobile">Last check-in ${formatDateShort(last.date)}</span>` : '<span class="badge badge-yellow">No check-ins</span>'}
+                ${plan ? '' : '<span class="badge badge-red">No plan</span>'}
+                <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="color:var(--text-light);flex-shrink:0"><path d="M9 18l6-6-6-6"/></svg>
+              </div>
+            </a>`;
+        }))
+      : ['<div class="empty-state"><p>No clients assigned yet.</p></div>'];
+
+    const unassignedSection = unassigned.length ? `
+      <div style="margin-top:28px">
+        <div class="section-header" style="margin-bottom:12px">
+          <span class="section-title">Unassigned Clients</span>
+          <span class="badge badge-yellow">${unassigned.length}</span>
         </div>
-        <div class="client-row-right">
-          ${last ? `<span class="badge badge-green badge-hide-mobile">Last check-in ${formatDateShort(last.date)}</span>` : '<span class="badge badge-yellow">No check-ins</span>'}
-          ${plan ? '' : '<span class="badge badge-red">No plan</span>'}
-          <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="color:var(--text-light);flex-shrink:0"><path d="M9 18l6-6-6-6"/></svg>
-        </div>
-      </a>`;
-  }));
-  el.innerHTML = rows.join('');
+        ${unassigned.map(c => `
+          <div class="card card-sm" style="margin-bottom:10px;display:flex;align-items:center;gap:12px">
+            <div class="avatar" style="flex-shrink:0">${getInitials(c.name)}</div>
+            <div style="flex:1;min-width:0">
+              <div style="font-weight:600;font-size:14px">${c.name}</div>
+              <div style="font-size:12px;color:var(--text-muted)">${c.goal || 'No goal set'}</div>
+            </div>
+            <button class="btn btn-sm btn-primary assign-btn" data-id="${c.id}" style="flex-shrink:0">Assign to me</button>
+          </div>`).join('')}
+      </div>` : '';
+
+    el.innerHTML = assignedRows.join('') + unassignedSection;
+
+    el.querySelectorAll('.assign-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        btn.disabled = true; btn.textContent = 'Assigning…';
+        await assignClientToNutritionist(btn.dataset.id, session.userId);
+        showToast('Client assigned!', 'success');
+        await render();
+      });
+    });
+  }
+
+  await render();
 }
 
 // ─── TEMPLATE MANAGER ────────────────────────────────────────────────────────
@@ -206,7 +243,7 @@ function openTemplateEditor(existing, nutritionistId, onSave) {
 
 // ─── APPOINTMENTS TAB ────────────────────────────────────────────────────────
 
-async function renderAppointmentsTab(session, clients) {
+async function renderAppointmentsTab(session) {
   const el = document.getElementById('appointments-list');
   if (!el) return;
 
@@ -302,7 +339,8 @@ async function renderAppointmentsTab(session, clients) {
   const modal = document.getElementById('appointment-modal');
   const form  = document.getElementById('appointment-form');
 
-  document.getElementById('new-appt-btn')?.addEventListener('click', () => {
+  document.getElementById('new-appt-btn')?.addEventListener('click', async () => {
+    const clients = await getClientsByNutritionist(session.userId);
     const sel = document.getElementById('appt-client');
     sel.innerHTML = `<option value="">Select a client…</option>` +
       clients.map(c => `<option value="${c.id}" data-name="${c.name}">${c.name}</option>`).join('');
@@ -359,14 +397,14 @@ async function initProfile() {
     window.location.href = 'nutritionist.html'; return;
   }
 
-  renderProfile(client);
+  renderProfile(client, session);
   await renderMealPlanEditor(client, session.userId);
   await renderCheckInHistoryN(client);
   renderProgressionSection(client);
   initNotesEditor(client);
 }
 
-function renderProfile(client) {
+function renderProfile(client, session) {
   document.title = client.name + ' — NutriCoach';
   document.getElementById('client-name').textContent = client.name;
   document.getElementById('client-goal').textContent = client.goal || '';
@@ -380,7 +418,17 @@ function renderProfile(client) {
       <div class="info-item"><label>Current Weight</label><div class="value">${client.currentWeight ? client.currentWeight + ' kg' : '—'}</div></div>
       <div class="info-item"><label>Goal</label><div class="value">${client.goal || '—'}</div></div>
       <div class="info-item"><label>Allergies</label><div class="value">${client.allergies || 'None'}</div></div>
+    </div>
+    <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
+      <button class="btn btn-sm btn-ghost" id="remove-client-btn" style="color:var(--danger)">Remove from my clients</button>
     </div>`;
+
+  document.getElementById('remove-client-btn').addEventListener('click', async () => {
+    if (!confirm(`Remove ${client.name} from your clients? They will become unassigned.`)) return;
+    await updateClient(client.id, { nutritionistId: null });
+    showToast('Client removed.', 'success');
+    setTimeout(() => { window.location.href = 'nutritionist.html'; }, 800);
+  });
 }
 
 // ─── MEAL PLAN EDITOR ────────────────────────────────────────────────────────

@@ -24,6 +24,15 @@ async function updateClient(clientId, fields) {
   await db.collection('clients').doc(clientId).update(fields);
 }
 
+async function getUnassignedClients() {
+  const snap = await db.collection('clients').where('nutritionistId', '==', null).get();
+  return snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+}
+
+async function assignClientToNutritionist(clientId, nutritionistId) {
+  await db.collection('clients').doc(clientId).update({ nutritionistId });
+}
+
 // ─── MEAL PLANS ──────────────────────────────────────────────────────────────
 
 async function getMealPlanByClient(clientId) {
