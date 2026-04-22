@@ -83,10 +83,25 @@ async function deleteAccount() {
     const userDoc = await db.collection('users').doc(user.uid).get();
     const role = userDoc.exists ? userDoc.data().role : null;
     const batch = db.batch();
+
     if (role === 'nutritionist') {
+      // Unassign all clients so they don't become orphaned
       const clients = await db.collection('clients').where('nutritionistId', '==', user.uid).get();
       clients.docs.forEach(doc => batch.update(doc.ref, { nutritionistId: null }));
     }
+
+    if (role === 'client') {
+      // Delete the clients doc so the account vanishes from the nutritionist's list
+      const clientSnap = await db.collection('clients').where('userId', '==', user.uid).limit(1).get();
+      if (!clientSnap.empty) {
+        const clientId = clientSnap.docs[0].id;
+        batch.delete(clientSnap.docs[0].ref);
+        // Delete their appointments so they vanish from the nutritionist's appointments tab too
+        const appts = await db.collection('appointments').where('clientId', '==', clientId).get();
+        appts.docs.forEach(doc => batch.delete(doc.ref));
+      }
+    }
+
     batch.delete(db.collection('users').doc(user.uid));
     await batch.commit();
     await user.delete();
