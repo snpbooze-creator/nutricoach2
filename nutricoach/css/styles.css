@@ -546,7 +546,7 @@ input[type="range"] {
 .client-row:hover { box-shadow: var(--shadow-md); transform: translateY(-1px); }
 .client-row:active { transform: translateY(0); }
 
-.client-row-info { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.client-row-info { display: flex; align-items: center; gap: 12px; min-width: 0; flex: 1; }
 
 .avatar {
   width: 42px;
@@ -565,7 +565,7 @@ input[type="range"] {
 
 .client-row-name { font-weight: 600; font-size: 14px; }
 .client-row-meta { font-size: 12px; color: var(--text-muted); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.client-row-right { display: flex; align-items: center; gap: 6px; flex-shrink: 0; margin-left: 8px; }
+.client-row-right { display: flex; align-items: center; gap: 6px; flex-shrink: 0; margin-left: 8px; align-self: flex-start; }
 .badge-hide-mobile { display: none; }
 
 /* ─── BADGES ──────────────────────────────────────────────────────────────── */
@@ -676,6 +676,14 @@ tbody tr:hover td { background: var(--teal-light); }
   -webkit-overflow-scrolling: touch;
   scrollbar-width: none;
   padding: 0 16px;
+  position: sticky;
+  top: 52px; /* below topbar */
+  z-index: 50;
+  background: var(--bg);
+}
+/* Profile page has no topbar — stick to top of viewport */
+[data-page="profile"] .tabs {
+  top: 0;
 }
 .tabs::-webkit-scrollbar { display: none; }
 

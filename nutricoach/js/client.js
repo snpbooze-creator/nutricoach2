@@ -113,7 +113,9 @@ async function renderMealPlan(client) {
           <div style="display:flex;align-items:center;gap:6px">
             <span class="badge badge-blue">${meal.items.length} item${meal.items.length !== 1 ? 's' : ''}</span>
             <button class="btn btn-sm btn-ghost upload-photo-btn" data-meal-type="${meal.type}"
-              style="padding:2px 6px;line-height:1;font-size:15px" title="Upload meal photo">📷</button>
+              style="padding:4px 6px;line-height:1" title="Upload meal photo">
+              <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>
+            </button>
           </div>
         </div>
         ${photos[meal.type]
