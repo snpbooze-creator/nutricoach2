@@ -190,6 +190,77 @@ async function deleteAppointment(appointmentId) {
   await db.collection('appointments').doc(appointmentId).delete();
 }
 
+// ─── CHECK-IN FEEDBACK (NEW FEATURE) ─────────────────────────────────────────
+
+async function updateCheckIn(checkInId, fields) {
+  await db.collection('checkIns').doc(checkInId).update(fields);
+}
+
+// ─── RECIPES (NEW FEATURE) ───────────────────────────────────────────────────
+
+async function getRecipes() {
+  const snap = await db.collection('recipes').get();
+  return snap.docs
+    .map(d => ({ id: d.id, ...d.data() }))
+    .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+}
+
+async function saveRecipe(recipe) {
+  const { id, ...data } = recipe;
+  await db.collection('recipes').doc(id).set(data);
+}
+
+async function deleteRecipe(recipeId) {
+  await db.collection('recipes').doc(recipeId).delete();
+}
+
+// ─── WEEKEND RISK (NEW FEATURE) ──────────────────────────────────────────────
+
+function getWeekMonday() {
+  const d = new Date();
+  const day = d.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  d.setDate(d.getDate() + diff);
+  return d.toISOString().split('T')[0];
+}
+
+async function getWeekendRisk(clientId, weekKey) {
+  const doc = await db.collection('weekendRisks').doc(`${clientId}_${weekKey}`).get();
+  if (!doc.exists) return null;
+  return { id: doc.id, ...doc.data() };
+}
+
+async function saveWeekendRisk(clientId, weekKey, hasEvent, note) {
+  await db.collection('weekendRisks').doc(`${clientId}_${weekKey}`).set({
+    clientId, weekKey, hasEvent, note: note || '',
+    savedAt: new Date().toISOString()
+  });
+}
+
+// ─── MEAL PHOTOS (NEW FEATURE) ───────────────────────────────────────────────
+
+async function saveMealPhoto(clientId, date, mealType, photoDataUrl) {
+  await db.collection('mealPhotos').doc(`${clientId}_${date}_${mealType}`).set({
+    clientId, date, mealType, photo: photoDataUrl,
+    uploadedAt: new Date().toISOString()
+  });
+}
+
+async function getMealPhotosByClientDate(clientId, date) {
+  const snap = await db.collection('mealPhotos')
+    .where('clientId', '==', clientId).where('date', '==', date).get();
+  const result = {};
+  snap.docs.forEach(d => { result[d.data().mealType] = d.data().photo; });
+  return result;
+}
+
+async function getMealPhotosByClient(clientId) {
+  const snap = await db.collection('mealPhotos').where('clientId', '==', clientId).get();
+  return snap.docs
+    .map(d => ({ id: d.id, ...d.data() }))
+    .sort((a, b) => b.date.localeCompare(a.date));
+}
+
 // ─── UTILITIES (sync) ────────────────────────────────────────────────────────
 
 function formatDate(dateStr) {

@@ -98,6 +98,7 @@
           <button class="tab active" data-tab="clients">Clients</button>
           <button class="tab" data-tab="appointments">Appointments</button>
           <button class="tab" data-tab="templates">Meal Templates</button>
+          <button class="tab" data-tab="recipes">Recipes</button>
         </div>
 
         <!-- Clients tab -->
@@ -130,6 +131,17 @@
               <button class="btn btn-sm btn-primary" id="new-template-btn">+ New Template</button>
             </div>
             <div id="template-list"></div>
+          </div>
+        </div>
+
+        <!-- NEW FEATURE — Recipes tab -->
+        <div class="tab-panel tab-body" data-tab-group="dash" data-tab="recipes">
+          <div class="section">
+            <div class="section-header">
+              <span class="section-title">Recipe Library</span>
+              <button class="btn btn-sm btn-primary" id="new-recipe-btn">+ New Recipe</button>
+            </div>
+            <div id="recipe-list"></div>
           </div>
         </div>
       </div>
@@ -215,6 +227,37 @@
           <textarea id="tpl-notes" rows="2" placeholder="Calorie targets, timing…"></textarea>
         </div>
         <button type="submit" class="btn btn-primary btn-full">Save Template</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- NEW FEATURE — Recipe editor modal -->
+  <div class="modal-backdrop" id="recipe-modal">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title">Recipe</span>
+        <button class="btn btn-sm btn-ghost" id="close-recipe-modal-btn">✕</button>
+      </div>
+      <form id="recipe-form">
+        <div class="form-group">
+          <label for="rcp-name">Recipe name</label>
+          <input type="text" id="rcp-name" placeholder="e.g. Chicken Salad" required>
+        </div>
+        <hr class="divider">
+        <div class="form-group">
+          <label>Ingredients</label>
+          <div id="rcp-ingredients-list" style="margin-bottom:8px"></div>
+          <div class="add-item-row">
+            <input type="text" id="rcp-ing-input" placeholder="Add ingredient…">
+            <button type="button" class="btn btn-sm btn-secondary" id="rcp-add-ing-btn">Add</button>
+          </div>
+        </div>
+        <hr class="divider">
+        <div class="form-group">
+          <label for="rcp-instructions">Instructions (optional)</label>
+          <textarea id="rcp-instructions" rows="3" placeholder="Preparation steps…"></textarea>
+        </div>
+        <button type="submit" class="btn btn-primary btn-full">Save Recipe</button>
       </form>
     </div>
   </div>

@@ -1,5 +1,27 @@
 // client.js — client dashboard logic (async/await, Firebase)
 
+// NEW FEATURE — image compression helper for meal photo upload
+function compressImage(file, maxWidth, quality) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = e => {
+      const img = new Image();
+      img.onload = () => {
+        const scale = Math.min(1, maxWidth / img.width);
+        const canvas = document.createElement('canvas');
+        canvas.width  = Math.round(img.width  * scale);
+        canvas.height = Math.round(img.height * scale);
+        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.onerror = reject;
+      img.src = e.target.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
   const session = await requireRole('client');
   if (!session) return;
@@ -27,6 +49,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   renderCheckInForm(client);
   await renderCheckInHistory(client);
   await renderClientAppointments(client, session);
+  await renderShoppingList(client);       // NEW FEATURE
+  await checkFridayPrompt(client);        // NEW FEATURE
 });
 
 async function renderStats(client) {
@@ -58,7 +82,6 @@ async function renderMealPlan(client) {
 
   document.getElementById('plan-date').textContent = 'Updated ' + formatDate(plan.dateCreated);
 
-  // Count total items for adherence calculation
   const totalItems = plan.meals.reduce((sum, m) => sum + m.items.length, 0);
 
   async function getCheckedCount() {
@@ -69,27 +92,37 @@ async function renderMealPlan(client) {
   async function syncAdherence() {
     if (!totalItems) return;
     const count = await getCheckedCount();
-    const pct = count / totalItems;
-    const score = Math.round(pct * 10);
-    const slider = document.getElementById('ci-adherence');
+    const score = Math.round((count / totalItems) * 10);
+    const slider  = document.getElementById('ci-adherence');
     const display = document.getElementById('ci-adherence-val');
-    if (slider) { slider.value = score; }
-    if (display) { display.textContent = score; }
+    if (slider)  slider.value = score;
+    if (display) display.textContent = score;
   }
 
   async function render() {
-    const checks = await getMealChecks(client.id, today);
+    // NEW FEATURE — also load today's meal photos
+    const [checks, photos] = await Promise.all([
+      getMealChecks(client.id, today),
+      getMealPhotosByClientDate(client.id, today)
+    ]);
 
     el.innerHTML = plan.meals.map((meal, mi) => `
       <div class="meal-section">
         <div class="meal-section-header">
           <span class="meal-type-label">${meal.type}</span>
-          <span class="badge badge-blue">${meal.items.length} item${meal.items.length !== 1 ? 's' : ''}</span>
+          <div style="display:flex;align-items:center;gap:6px">
+            <span class="badge badge-blue">${meal.items.length} item${meal.items.length !== 1 ? 's' : ''}</span>
+            <button class="btn btn-sm btn-ghost upload-photo-btn" data-meal-type="${meal.type}"
+              style="padding:2px 6px;line-height:1;font-size:15px" title="Upload meal photo">📷</button>
+          </div>
         </div>
+        ${photos[meal.type]
+          ? `<img src="${photos[meal.type]}" style="width:100%;max-height:160px;object-fit:cover;border-radius:8px;margin-bottom:10px" alt="${meal.type} photo">`
+          : ''}
         <div class="meal-items">
           ${meal.items.length
             ? meal.items.map((item, ii) => {
-                const key = `${mi}-${ii}`;
+                const key     = `${mi}-${ii}`;
                 const checked = checks.includes(key);
                 return `
                   <label class="meal-item meal-item-check" style="cursor:pointer;user-select:none;${checked ? 'opacity:0.6' : ''}">
@@ -110,14 +143,37 @@ async function renderMealPlan(client) {
         ${escapeHtml(plan.notes)}
       </div>` : '');
 
+    // NEW FEATURE — meal photo upload handlers (re-attached each render, safe since innerHTML replaces old nodes)
+    el.querySelectorAll('.upload-photo-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const fileInput = document.createElement('input');
+        fileInput.type = 'file';
+        fileInput.accept = 'image/*';
+        fileInput.onchange = async () => {
+          const file = fileInput.files[0];
+          if (!file) return;
+          btn.textContent = '⏳';
+          btn.disabled = true;
+          try {
+            const dataUrl = await compressImage(file, 400, 0.65);
+            await saveMealPhoto(client.id, today, btn.dataset.mealType, dataUrl);
+            showToast('Photo uploaded!', 'success');
+          } catch (err) {
+            showToast('Could not upload photo.', 'error');
+          }
+          await render();
+          await updateSummary();
+        };
+        fileInput.click();
+      });
+    });
+
     await syncAdherence();
   }
 
-  // Progress summary bar below the plan
-  // Remove existing bar if present to avoid duplicates
+  // Progress summary bar
   const existingBar = document.getElementById('meal-progress-bar');
   if (existingBar) existingBar.remove();
-
   const summary = document.createElement('div');
   summary.id = 'meal-progress-bar';
   el.parentElement.appendChild(summary);
@@ -139,8 +195,7 @@ async function renderMealPlan(client) {
       </div>`;
   }
 
-  // Single delegated listener on el — survives innerHTML re-renders; guard prevents
-  // duplicate registration when renderMealPlan is called again (e.g. after check-in submit).
+  // Delegated listener for meal checkboxes — guarded to prevent duplicate registration
   if (!el._mealListenerAttached) {
     el._mealListenerAttached = true;
     el.addEventListener('change', async e => {
@@ -166,11 +221,11 @@ async function renderMealPlan(client) {
 // ─── CHECK-IN FORM ────────────────────────────────────────────────────────────
 
 function renderCheckInForm(client) {
-  const form = document.getElementById('checkin-form');
+  const form  = document.getElementById('checkin-form');
   const today = new Date().toISOString().split('T')[0];
 
   ['adherence', 'hunger', 'energy'].forEach(field => {
-    const slider = document.getElementById(`ci-${field}`);
+    const slider  = document.getElementById(`ci-${field}`);
     const display = document.getElementById(`ci-${field}-val`);
     if (slider && display) {
       display.textContent = slider.value;
@@ -188,15 +243,16 @@ function renderCheckInForm(client) {
       showToast('Please enter a valid weight.', 'error'); return;
     }
     const checkIn = {
-      clientId:   client.id,
-      date:       today,
-      adherence:  parseInt(document.getElementById('ci-adherence').value),
-      hunger:     parseInt(document.getElementById('ci-hunger').value),
-      energy:     parseInt(document.getElementById('ci-energy').value),
+      clientId:    client.id,
+      date:        today,
+      adherence:   parseInt(document.getElementById('ci-adherence').value),
+      hunger:      parseInt(document.getElementById('ci-hunger').value),
+      energy:      parseInt(document.getElementById('ci-energy').value),
       weight,
-      bodyFat:    null,
-      muscleMass: null,
-      comments:   document.getElementById('ci-comments').value.trim()
+      waterIntake: parseFloat(document.getElementById('ci-water')?.value) || null, // NEW FEATURE
+      bodyFat:     null,
+      muscleMass:  null,
+      comments:    document.getElementById('ci-comments').value.trim()
     };
 
     await addCheckIn(checkIn);
@@ -243,9 +299,8 @@ async function renderClientAppointments(client, session) {
   };
 
   async function render() {
-    const today = new Date().toISOString().split('T')[0];
-    const all   = await getAppointmentsByClient(client.id);
-
+    const today     = new Date().toISOString().split('T')[0];
+    const all       = await getAppointmentsByClient(client.id);
     const upcoming  = all.filter(a => (a.status === 'upcoming' || a.status === 'requested') && a.date >= today);
     const past      = all.filter(a => a.status === 'completed' || (a.date < today && a.status !== 'cancelled'))
                         .sort((a, b) => b.date.localeCompare(a.date));
@@ -258,7 +313,6 @@ async function renderClientAppointments(client, session) {
         cancelled: `<span class="badge" style="background:var(--border);color:var(--text-muted)">Cancelled</span>`,
         requested: `<span class="badge badge-yellow">Requested</span>`
       })[a.status] || `<span class="badge">${a.status}</span>`;
-
       const canCancel = a.status === 'upcoming' || a.status === 'requested';
       return `
         <div class="card card-sm" style="margin-bottom:8px">
@@ -313,25 +367,10 @@ async function renderClientAppointments(client, session) {
         </form>
       </div>
 
-      ${upcoming.length ? `
-        <div style="margin-bottom:16px">
-          <div class="section-title" style="margin-bottom:10px">Upcoming</div>
-          ${upcoming.map(apptCard).join('')}
-        </div>` : ''}
-
-      ${past.length ? `
-        <div style="margin-bottom:16px">
-          <div class="section-title" style="margin-bottom:10px">Past</div>
-          ${past.map(apptCard).join('')}
-        </div>` : ''}
-
-      ${cancelled.length ? `
-        <div style="margin-bottom:16px">
-          <div class="section-title" style="margin-bottom:10px">Cancelled</div>
-          ${cancelled.map(apptCard).join('')}
-        </div>` : ''}
-
-      ${!all.length ? `<div class="empty-state"><div class="empty-icon">📅</div><p>No appointments yet. Request one above!</p></div>` : ''}
+      ${upcoming.length  ? `<div style="margin-bottom:16px"><div class="section-title" style="margin-bottom:10px">Upcoming</div>${upcoming.map(apptCard).join('')}</div>` : ''}
+      ${past.length      ? `<div style="margin-bottom:16px"><div class="section-title" style="margin-bottom:10px">Past</div>${past.map(apptCard).join('')}</div>` : ''}
+      ${cancelled.length ? `<div style="margin-bottom:16px"><div class="section-title" style="margin-bottom:10px">Cancelled</div>${cancelled.map(apptCard).join('')}</div>` : ''}
+      ${!all.length      ? `<div class="empty-state"><div class="empty-icon">📅</div><p>No appointments yet. Request one above!</p></div>` : ''}
     `;
 
     document.getElementById('request-appt-form').addEventListener('submit', async e => {
@@ -343,12 +382,9 @@ async function renderClientAppointments(client, session) {
       const btn   = e.target.querySelector('button[type="submit"]');
       btn.disabled = true; btn.textContent = 'Sending…';
       await scheduleAppointment({
-        clientId:       client.id,
-        nutritionistId: client.nutritionistId || '',
-        clientName:     session.name,
-        date, time, type, notes,
-        status:    'requested',
-        createdBy: 'client'
+        clientId: client.id, nutritionistId: client.nutritionistId || '',
+        clientName: session.name, date, time, type, notes,
+        status: 'requested', createdBy: 'client'
       });
       btn.disabled = false; btn.textContent = 'Send Request';
       showToast('Appointment requested!', 'success');
@@ -383,8 +419,8 @@ async function renderCheckInHistory(client) {
       <table>
         <thead>
           <tr>
-            <th>Date</th><th>Adherence</th><th>Hunger</th><th>Energy</th>
-            <th>Weight</th><th>Comments</th>
+            <th>Date</th><th>Adh.</th><th>Hunger</th><th>Energy</th>
+            <th>Weight</th><th>Water</th><th>Comments</th><th>Feedback</th>
           </tr>
         </thead>
         <tbody>
@@ -395,9 +431,135 @@ async function renderCheckInHistory(client) {
               <td><span class="score ${scoreClass(ci.hunger)}">${ci.hunger}</span></td>
               <td><span class="score ${scoreClass(ci.energy)}">${ci.energy}</span></td>
               <td><strong>${ci.weight} kg</strong></td>
-              <td style="max-width:200px;color:var(--text-muted)">${escapeHtml(ci.comments) || '—'}</td>
+              <td>${ci.waterIntake != null ? ci.waterIntake + ' L' : '—'}</td>
+              <td style="max-width:160px;color:var(--text-muted)">${escapeHtml(ci.comments) || '—'}</td>
+              <td style="max-width:180px;color:var(--teal);font-style:italic;font-size:12px">
+                ${ci.feedback ? escapeHtml(ci.feedback) : '<span style="color:var(--text-light)">—</span>'}
+              </td>
             </tr>`).join('')}
         </tbody>
       </table>
     </div>`;
+}
+
+// ─── SHOPPING LIST (NEW FEATURE) ─────────────────────────────────────────────
+
+async function renderShoppingList(client) {
+  const el = document.getElementById('shopping-list-content');
+  if (!el) return;
+
+  const plan = await getMealPlanByClient(client.id);
+  if (!plan) {
+    el.innerHTML = `<div class="card" style="max-width:560px">
+      <div class="empty-state">
+        <div class="empty-icon">🛒</div>
+        <p>No meal plan yet. Your shopping list will appear here once your nutritionist creates one.</p>
+      </div>
+    </div>`;
+    return;
+  }
+
+  // Collect all items across all meals, deduplicated (case-insensitive)
+  const seen = new Set();
+  const allItems = [];
+  plan.meals.forEach(meal => {
+    meal.items.forEach(item => {
+      const key = item.toLowerCase().trim();
+      if (!seen.has(key)) { seen.add(key); allItems.push(item); }
+    });
+  });
+
+  if (!allItems.length) {
+    el.innerHTML = `<div class="card" style="max-width:560px">
+      <div class="empty-state"><div class="empty-icon">🛒</div><p>Your meal plan has no items yet.</p></div>
+    </div>`;
+    return;
+  }
+
+  const storageKey = `shopping_${client.id}`;
+
+  function getChecked() { return JSON.parse(localStorage.getItem(storageKey) || '[]'); }
+  function setChecked(arr) { localStorage.setItem(storageKey, JSON.stringify(arr)); }
+
+  function render() {
+    const checked   = getChecked();
+    const remaining = allItems.filter(i => !checked.includes(i)).length;
+
+    el.innerHTML = `
+      <div class="card" style="max-width:560px">
+        <div class="card-header">
+          <div>
+            <div class="card-title">Shopping List</div>
+            <div class="card-subtitle">${remaining} of ${allItems.length} items remaining</div>
+          </div>
+          <button class="btn btn-sm btn-ghost" id="clear-shopping-btn" style="font-size:12px">Reset</button>
+        </div>
+        <div>
+          ${allItems.map(item => {
+            const isDone = checked.includes(item);
+            return `
+              <label class="meal-item meal-item-check" style="cursor:pointer;user-select:none;${isDone ? 'opacity:0.5' : ''}">
+                <input type="checkbox" class="shopping-cb" data-item="${escapeHtml(item)}"
+                  ${isDone ? 'checked' : ''}
+                  style="width:18px;height:18px;accent-color:var(--teal);flex-shrink:0;cursor:pointer;margin-right:10px">
+                <span style="${isDone ? 'text-decoration:line-through;color:var(--text-light)' : ''}">${escapeHtml(item)}</span>
+              </label>`;
+          }).join('')}
+        </div>
+      </div>`;
+
+    document.getElementById('clear-shopping-btn').addEventListener('click', () => {
+      setChecked([]);
+      render();
+    });
+
+    el.querySelectorAll('.shopping-cb').forEach(cb => {
+      cb.addEventListener('change', () => {
+        const current = getChecked();
+        const item    = cb.dataset.item;
+        if (cb.checked) { if (!current.includes(item)) current.push(item); }
+        else { const idx = current.indexOf(item); if (idx > -1) current.splice(idx, 1); }
+        setChecked(current);
+        render();
+      });
+    });
+  }
+
+  render();
+}
+
+// ─── FRIDAY ADHERENCE PROMPT (NEW FEATURE) ───────────────────────────────────
+
+async function checkFridayPrompt(client) {
+  if (new Date().getDay() !== 5) return; // only on Fridays
+  const weekKey  = getWeekMonday();
+  const existing = await getWeekendRisk(client.id, weekKey);
+  if (existing) return; // already answered this week
+  showFridayModal(client, weekKey);
+}
+
+function showFridayModal(client, weekKey) {
+  const modal = document.getElementById('friday-modal');
+  if (!modal) return;
+  modal.style.display = 'flex';
+
+  // Replace buttons to clear any stale listeners
+  ['friday-submit-btn', 'friday-skip-btn'].forEach(id => {
+    const old = document.getElementById(id);
+    const neo = old.cloneNode(true);
+    old.replaceWith(neo);
+  });
+
+  document.getElementById('friday-submit-btn').addEventListener('click', async () => {
+    const hasEvent = document.getElementById('friday-has-event').checked;
+    const note     = document.getElementById('friday-note').value.trim();
+    await saveWeekendRisk(client.id, weekKey, hasEvent, note);
+    modal.style.display = 'none';
+    showToast('Weekend plan saved! Stay on track 💪', 'success');
+  });
+
+  document.getElementById('friday-skip-btn').addEventListener('click', async () => {
+    await saveWeekendRisk(client.id, weekKey, false, '');
+    modal.style.display = 'none';
+  });
 }
