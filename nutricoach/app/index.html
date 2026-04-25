@@ -107,9 +107,12 @@
   <script src="../js/data.js"></script>
   <script src="../js/auth.js"></script>
   <script>
-    // Redirect if already logged in
+    // Guard flag — prevents onAuthStateChanged from racing with the signup flow
+    let _signingUp = false;
+
+    // Redirect if already logged in (skip during active sign-up)
     auth.onAuthStateChanged(async user => {
-      if (!user) return;
+      if (!user || _signingUp) return;
       try {
         const doc = await db.collection('users').doc(user.uid).get();
         if (!doc.exists) return;
@@ -170,7 +173,9 @@
         return;
       }
       btn.disabled = true; btn.textContent = 'Creating account…';
+      _signingUp = true;
       const result = await createUser({ name, email, password, role });
+      _signingUp = false;
       btn.disabled = false; btn.textContent = 'Create Account';
       if (!result.ok) { errEl.textContent = result.error; errEl.style.display = 'block'; return; }
       errEl.style.display = 'none';
